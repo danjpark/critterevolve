@@ -1,4 +1,5 @@
 import type { EraSummary as Summary } from "../game/islandCrossing";
+import { explainEra } from "../game/eraInsight";
 
 interface EraSummaryProps {
   summary: Summary;
@@ -20,6 +21,7 @@ function roman(value: number): string {
 
 export function EraSummary({ summary, onContinue }: EraSummaryProps) {
   const { before, after } = summary;
+  const insight = explainEra(summary);
   return (
     <div className="overlay overlay--summary" role="dialog" aria-modal="true" aria-labelledby="summary-title">
       <div className="summary-card">
@@ -34,6 +36,12 @@ export function EraSummary({ summary, onContinue }: EraSummaryProps) {
           <div><span>Farthest offshore</span>{signed(before.farthestOffshore, after.farthestOffshore, (v) => `${Math.round(v)}m`)}</div>
           <div><span>Target population</span>{signed(before.targetPopulation, after.targetPopulation, String)}</div>
         </div>
+        <section className={`era-insight era-insight--${insight.kind}`}>
+          <span className="eyebrow">What this means</span>
+          <strong>{insight.headline}</strong>
+          <p>{insight.explanation}</p>
+          <small><b>Next experiment:</b> {insight.recommendation}</small>
+        </section>
         <button className="button button--primary button--wide" onClick={onContinue}>Plan the next era</button>
       </div>
     </div>

@@ -169,3 +169,16 @@ food placement era and coordinates
 Opening a replay link restores each era's food automatically and locks editing. Playback speed, pause, Step tick, and the Critter lens remain available so another player can investigate the outcome. The simulation is recomputed from tick zero; positions, metrics, and results are not embedded in the URL.
 
 Replay payloads are URL-safe, limited to the mission's maximum 15 actions, and validated for version compatibility, map boundaries, per-era budgets, and overlapping placements. The deterministic test suite proves that encoding and replaying a complete five-era strategy recreates the original final state exactly.
+
+## Causal era summaries
+
+Each era report converts raw metric changes into one deterministic interpretation and a suggested next experiment. The rule order highlights:
+
+1. Far-island births as colony formation.
+2. Population losses of 12% or more as excessive ecological pressure.
+3. Crossings without births as exploration rather than establishment.
+4. Swimming increases of at least one percentage point as inherited selection, including the land-performance cost.
+5. Water-activity increases of at least eight percentage points as behavioral exploration before genetic change.
+6. Otherwise, a weak-selection explanation.
+
+These messages do not affect the simulation. They are derived after an era from the same before/after metrics already shown in the report, making their reasoning deterministic and testable.
