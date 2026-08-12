@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { balance } from "../game/config";
 import {
   advanceEraTick,
@@ -12,6 +12,7 @@ import {
 } from "../game/islandCrossing";
 import { PixiWorld } from "../render/PixiWorld";
 import type { WorldTransition } from "../render/PixiWorld";
+import type { TrailPoint } from "../render/PixiWorld";
 import type { Point } from "../sim/types";
 import { EraSummary } from "../ui/EraSummary";
 import { Metric } from "../ui/Metric";
@@ -40,6 +41,8 @@ export function App() {
   const progressRef = useRef(0);
   const [paused, setPaused] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [selectedCritterId, setSelectedCritterId] = useState<number>();
+  const [selectedTrail, setSelectedTrail] = useState<TrailPoint[]>([]);
   const metrics = game.sim.metrics;
   const remaining = remainingPlacements(game);
   const simulating = game.phase === "simulating" || Boolean(transition);
@@ -48,6 +51,32 @@ export function App() {
   const visibleTick = transition ? transition.to.tick : game.sim.tick;
   const visibleEraTick = game.eraTick + (transition ? 1 : 0);
   const eraProgress = Math.min(100, (visibleEraTick / balance.ticksPerEra) * 100);
+  const visibleSimulation = transition?.to ?? game.sim;
+  const selectedCritter = selectedCritterId === undefined
+    ? undefined
+    : visibleSimulation.critters.find((critter) => critter.id === selectedCritterId);
+  const selectedRecord = selectedCritterId === undefined
+    ? undefined
+    : visibleSimulation.lastTickRecords[selectedCritterId];
+
+  const selectCritter = useCallback((critterId: number) => {
+    const simulation = transition?.to ?? game.sim;
+    const critter = simulation.critters.find((item) => item.id === critterId);
+    if (!critter) return;
+    setSelectedCritterId(critterId);
+    setSelectedTrail([{ tick: simulation.tick, x: critter.x, y: critter.y }]);
+    setPaused(true);
+  }, [game.sim, transition]);
+
+  useEffect(() => {
+    if (selectedCritterId === undefined) return;
+    const critter = game.sim.critters.find((item) => item.id === selectedCritterId);
+    if (!critter) return;
+    setSelectedTrail((trail) => {
+      if (trail.at(-1)?.tick === game.sim.tick) return trail;
+      return [...trail, { tick: game.sim.tick, x: critter.x, y: critter.y }].slice(-40);
+    });
+  }, [game.sim, selectedCritterId]);
 
   const observation = useMemo(() => {
     const observed = transition?.to ?? (game.sim.tick > 0 ? game.sim : undefined);
@@ -172,6 +201,8 @@ export function App() {
     setTransitionProgress(0);
     setPaused(false);
     setBriefing(false);
+    setSelectedCritterId(undefined);
+    setSelectedTrail([]);
     setNotice("A new island, a new lineage.");
   }
 
@@ -241,6 +272,9 @@ export function App() {
             placementEnabled={placing}
             transition={transition}
             transitionProgress={transitionProgress}
+            selectedCritterId={selectedCritterId}
+            selectedTrail={selectedTrail}
+            onSelectCritter={selectCritter}
           />
           <div className="map-legend">
             <span><i className="legend-land" /> Land</span>
@@ -262,6 +296,37 @@ export function App() {
             <span className="eyebrow">{simulating ? "Simulation playback" : "Ecological tools"}</span>
             <span className="tool-count">{simulating ? `${Math.round(eraProgress)}%` : `${remaining} LEFT`}</span>
           </div>
+          {selectedCritterId !== undefined && (
+            <section className="critter-inspector" aria-label={`Inspecting critter ${selectedCritterId}`}>
+              <div className="inspector-heading">
+                <div><span className="eyebrow">Critter lens</span><strong>#{selectedCritterId}</strong></div>
+                <button onClick={() => { setSelectedCritterId(undefined); setSelectedTrail([]); }} aria-label="Close critter inspector">x</button>
+              </div>
+              {selectedCritter ? (
+                <>
+                  <div className="inspector-grid">
+                    <span>Action</span><strong>{selectedRecord?.action ?? selectedCritter.lastAction}</strong>
+                    <span>Swimming</span><strong>{percent(selectedCritter.genome.aquaticMovement)}</strong>
+                    <span>Energy</span><strong>{selectedCritter.energy.toFixed(2)} / {balance.maximumEnergy}</strong>
+                    <span>Age</span><strong>{selectedCritter.age} ticks</strong>
+                    <span>Parent</span><strong>{selectedCritter.parentId ? `#${selectedCritter.parentId}` : "founder"}</strong>
+                    <span>Target</span><strong>{selectedCritter.targetFoodId?.replace(/^player-\d+-\d+-/, "food @ ") ?? "none"}</strong>
+                  </div>
+                  {selectedRecord ? (
+                    <div className="tick-equation">
+                      <span>Tick {selectedRecord.tick} movement</span>
+                      <code>{balance.baseMovementPerTick.toFixed(1)} x {selectedRecord.movementEfficiency.toFixed(2)} = {selectedRecord.plannedDistance.toFixed(2)} units{Math.abs(selectedRecord.plannedDistance - selectedRecord.actualDistance) > 0.01 ? ` (${selectedRecord.actualDistance.toFixed(2)} after boundary)` : ""}</code>
+                      <span>Energy ledger</span>
+                      <code>{selectedRecord.energyBefore.toFixed(2)} - {selectedRecord.metabolicCost.toFixed(3)} metabolism - {selectedRecord.movementCost.toFixed(3)} move + {selectedRecord.foodEnergy.toFixed(2)} food{selectedRecord.reproduced ? ` - ${balance.reproductionCost.toFixed(1)} birth` : ""} = {selectedRecord.energyAfter.toFixed(2)}</code>
+                    </div>
+                  ) : <p>Select it again after the first tick to see its calculation.</p>}
+                  <small>Gold trail: last {selectedTrail.length} recorded positions</small>
+                </>
+              ) : (
+                <p>This critter died on tick {selectedRecord?.tick ?? visibleTick}. Its final action was {selectedRecord?.action ?? "death"}.</p>
+              )}
+            </section>
+          )}
           {simulating ? (
             <>
               <div className="playback-status">
@@ -295,7 +360,7 @@ export function App() {
                   </>
                 ) : <p>Preparing the next deterministic tick…</p>}
               </div>
-              <p className="advance-help">Orange lineages favor land; blue lineages move more confidently through water. Gold trails mark a crossing.</p>
+              <p className="advance-help">Click a critter to pause, inspect its equation, and follow its gold trail. Orange favors land; blue favors water.</p>
             </>
           ) : (
             <>

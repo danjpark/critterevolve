@@ -1,6 +1,7 @@
 import { balance } from "../game/config";
 import type {
   Critter,
+  CritterTickRecord,
   FoodPatch,
   Habitat,
   Point,
@@ -159,6 +160,7 @@ export function createSimulation(seed: number, environment: SimulationEnvironmen
     targetBirths: 0,
     targetPersistenceTicks: 0,
     lastTickEvents: emptyEvents(),
+    lastTickRecords: {},
     metrics: calculateMetrics(critters, 0, 0, environment.leftShoreX),
   };
 }
@@ -185,10 +187,13 @@ export function advanceTick(state: SimulationState, environment: SimulationEnvir
   let nextCritterId = state.nextCritterId;
   let targetBirths = state.targetBirths;
   let maximumGeneration = state.generation;
+  const lastTickRecords: Record<number, CritterTickRecord> = {};
 
   for (const previous of state.critters) {
     const critter: Critter = { ...previous, genome: { ...previous.genome } };
     const previousHabitat = critter.habitat;
+    const from = { x: critter.x, y: critter.y };
+    const energyBefore = critter.energy;
     const currentTarget = critter.targetFoodId ? foodsById.get(critter.targetFoodId) : undefined;
     const shouldReconsider = !currentTarget || (foodLevels[currentTarget.id] ?? 0) < 0.03 || (state.tick + critter.id) % 12 === 0;
     const target = shouldReconsider ? chooseFood(critter, environment, foodLevels) : currentTarget;
@@ -217,7 +222,9 @@ export function advanceTick(state: SimulationState, environment: SimulationEnvir
     critter.x = nextX;
     critter.y = nextY;
     critter.habitat = environment.habitatAt(critter);
-    critter.energy -= balance.baseMetabolicCost + movementEnergyCost(critter.genome.aquaticMovement, critter.habitat, actualDistance);
+    const tickMovementEfficiency = movementEfficiency(critter.genome.aquaticMovement, critter.habitat);
+    const tickMovementCost = movementEnergyCost(critter.genome.aquaticMovement, critter.habitat, actualDistance);
+    critter.energy -= balance.baseMetabolicCost + tickMovementCost;
     events.moved += 1;
     if ((previousHabitat === "land" || previousHabitat === "target") && (critter.habitat === "shallow" || critter.habitat === "deep")) {
       events.waterEntries += 1;
@@ -225,6 +232,8 @@ export function advanceTick(state: SimulationState, environment: SimulationEnvir
     if (previousHabitat !== "target" && critter.habitat === "target") events.crossings += 1;
 
     const reachedFood = target && Math.hypot(target.x - critter.x, target.y - critter.y) <= balance.eatingRadius;
+    let foodIntake = 0;
+    let foodEnergy = 0;
     if (target && reachedFood) {
       const available = foodLevels[target.id] ?? 0;
       const intake = Math.min(
@@ -232,8 +241,11 @@ export function advanceTick(state: SimulationState, environment: SimulationEnvir
         balance.foodIntakePerTick * feedingEfficiency(critter.genome.aquaticMovement, critter.habitat),
       );
       if (intake > 0) {
+        foodIntake = intake;
+        const energyBeforeEating = critter.energy;
         foodLevels[target.id] = available - intake;
         critter.energy = Math.min(balance.maximumEnergy, critter.energy + intake * balance.foodEnergyPerUnit);
+        foodEnergy = critter.energy - energyBeforeEating;
         critter.lastAction = "eating";
         events.ate += 1;
       }
@@ -247,6 +259,7 @@ export function advanceTick(state: SimulationState, environment: SimulationEnvir
       critter.reproductionCooldown === 0 &&
       survivors.length + newborns.length + state.critters.length < balance.maximumPopulation * 2;
 
+    let childId: number | undefined;
     if (canReproduce && survivors.length + newborns.length < balance.maximumPopulation) {
       critter.energy -= balance.reproductionCost;
       critter.reproductionCooldown = balance.reproductionCooldownTicks;
@@ -267,6 +280,7 @@ export function advanceTick(state: SimulationState, environment: SimulationEnvir
         targetFoodId: critter.targetFoodId,
         lastAction: "wandering",
       };
+      childId = child.id;
       newborns.push(child);
       maximumGeneration = Math.max(maximumGeneration, generation);
       events.births += 1;
@@ -276,8 +290,30 @@ export function advanceTick(state: SimulationState, environment: SimulationEnvir
       }
     }
 
-    if (critter.energy > 0 && critter.age < balance.maximumAgeTicks) survivors.push(critter);
+    const survived = critter.energy > 0 && critter.age < balance.maximumAgeTicks;
+    if (survived) survivors.push(critter);
     else events.deaths += 1;
+    lastTickRecords[critter.id] = {
+      critterId: critter.id,
+      tick: state.tick + 1,
+      targetFoodId: target?.id,
+      action: survived ? critter.lastAction : "died",
+      from,
+      to: { x: critter.x, y: critter.y },
+      habitatFrom: previousHabitat,
+      habitatTo: critter.habitat,
+      movementEfficiency: tickMovementEfficiency,
+      plannedDistance: travel,
+      actualDistance,
+      energyBefore,
+      metabolicCost: balance.baseMetabolicCost,
+      movementCost: tickMovementCost,
+      foodIntake,
+      foodEnergy,
+      energyAfter: critter.energy,
+      reproduced: childId !== undefined,
+      childId,
+    };
   }
 
   const critters = [...survivors, ...newborns].slice(0, balance.maximumPopulation);
@@ -296,6 +332,7 @@ export function advanceTick(state: SimulationState, environment: SimulationEnvir
     targetBirths,
     targetPersistenceTicks,
     lastTickEvents: events,
+    lastTickRecords,
     metrics,
   };
 }

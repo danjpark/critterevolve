@@ -55,6 +55,28 @@ export interface TickEvents {
   deaths: number;
 }
 
+export interface CritterTickRecord {
+  critterId: number;
+  tick: number;
+  targetFoodId?: string;
+  action: Critter["lastAction"] | "died";
+  from: Point;
+  to: Point;
+  habitatFrom: Habitat;
+  habitatTo: Habitat;
+  movementEfficiency: number;
+  plannedDistance: number;
+  actualDistance: number;
+  energyBefore: number;
+  metabolicCost: number;
+  movementCost: number;
+  foodIntake: number;
+  foodEnergy: number;
+  energyAfter: number;
+  reproduced: boolean;
+  childId?: number;
+}
+
 export interface SimulationState {
   seed: number;
   rngState: number;
@@ -66,6 +88,7 @@ export interface SimulationState {
   targetBirths: number;
   targetPersistenceTicks: number;
   lastTickEvents: TickEvents;
+  lastTickRecords: Record<number, CritterTickRecord>;
   metrics: SimulationMetrics;
 }
 

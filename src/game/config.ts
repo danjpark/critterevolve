@@ -1,5 +1,5 @@
 export const balance = {
-  gameVersion: "0.3.0",
+  gameVersion: "0.4.0",
   levelVersion: "island-crossing-1",
   maxEras: 5,
   foodPatchesPerEra: 3,
@@ -31,9 +31,9 @@ export const balance = {
   reproductionCooldownTicks: 72,
   minimumReproductionAge: 36,
   maximumAgeTicks: 960,
-  targetPopulationRequired: 20,
-  targetBirthsRequired: 5,
-  targetPersistenceRequiredTicks: 48,
+  targetPopulationRequired: 55,
+  targetBirthsRequired: 12,
+  targetPersistenceRequiredTicks: 96,
 } as const;
 
 export const palette = {

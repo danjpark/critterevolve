@@ -70,6 +70,13 @@ describe("deterministic evolution simulation", () => {
     expect(after.lastTickEvents.ate).toBe(1);
     expect(after.foodLevels[food.id]).toBeLessThan(5 + balance.foodCapacityMultiplier * balance.foodRegrowthFraction);
     expect(after.critters[0].energy).toBeGreaterThan(eater.energy);
+    const record = after.lastTickRecords[eater.id];
+    expect(record.targetFoodId).toBe(food.id);
+    expect(record.foodIntake).toBeGreaterThan(0);
+    expect(record.energyAfter).toBeCloseTo(
+      record.energyBefore - record.metabolicCost - record.movementCost + record.foodEnergy,
+      8,
+    );
   });
 
   it("creates a persistent child ID only when a parent reproduces", () => {

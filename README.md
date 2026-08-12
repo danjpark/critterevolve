@@ -21,7 +21,7 @@ Play the public build at **https://danjpark.github.io/critterevolve/**.
 - Food persists for two eras.
 - Run 240 real simulation ticks per era, for at most five eras.
 - Pause at any moment, advance exactly one tick, or watch at 1x, 4x, or 12x speed.
-- Establish at least 20 critters on the target island, record five local births, and sustain the population for 48 ticks.
+- Establish at least 55 critters on the target island, record 12 local births, and sustain the population for 96 ticks.
 - Swimming ability is inherited and mutable. Better swimmers pay a terrestrial-efficiency cost.
 
 The `D` key toggles deterministic simulation diagnostics. Playback speed changes only presentation; the run ID and exported run data capture the seed, level version, and every player intervention for exact reproduction.
@@ -38,7 +38,7 @@ src/app     React orchestration and responsive styling
 
 The simulation has no DOM, React, or PixiJS dependencies. Rendering reads simulation state; it never decides outcomes.
 
-## Tick model v0.3
+## Tick model v0.4
 
 Critter Evolve uses the same central idea as a cellular automaton: state `N` is the complete input to one deterministic update, which produces state `N + 1`. A surviving critter keeps its ID, genome, position, heading, energy, age, and current food target. Its position can change only by the movement calculated for that one tick. A birth gets a new ID and a `parentId`; the renderer uses that relationship only to animate the child appearing near its parent.
 
@@ -118,8 +118,39 @@ Reproduction occurs after eating when energy is at least `12.5`, age is at least
 
 ### Action scope
 
-The current causal action set is **sense, steer/wander, move, eat, reproduce, and die**. Hunting, combat, cooperation, mating choice, and memory are not implemented in Island Crossing v0.3. They can be added later as explicit decision intents and resolution stages, but they should not be hidden inside rendering or silently alter this tick contract.
+The current causal action set is **sense, steer/wander, move, eat, reproduce, and die**. Hunting, combat, cooperation, mating choice, and memory are not implemented in Island Crossing v0.4. They can be added later as explicit decision intents and resolution stages, but they should not be hidden inside rendering or silently alter this tick contract.
 
 ### Determinism checks
 
 The automated tests assert that identical seeds replay exactly, surviving IDs persist, movement is bounded to one step per tick, food becomes energy and is depleted, births create a new child ID, starvation causes death, aquatic pressure changes selection, and the 240 one-step calls in an era equal the one-call headless result.
+
+## Following one critter
+
+Click any critter to pause and open the **Critter lens**. The selected individual receives a gold ring and a trail containing up to 40 committed positions. The panel shows its persistent ID, parent, age, trait, energy, current target, and latest action. Its tick ledger exposes the actual movement equation and every energy addition or subtraction, including metabolism, terrain-dependent movement, eating, and reproduction.
+
+The ledger is stored by the simulation in `lastTickRecords`; it is not reverse-engineered by the UI. This keeps debugging truthful and makes the same information available to future clients or replay tools.
+
+## v0.4 balance baseline
+
+The balance suite plays five complete eras for ten fixed seeds. These are test strategies, not a required solution sequence.
+
+| Strategy | Wins | Mean swimming | Mean land performance | Mean final target population |
+| --- | ---: | ---: | ---: | ---: |
+| Food kept on land | 0 / 10 | 16.7% | 90.3% | 8.3 |
+| Food held at shoreline | 0 / 10 | 19.3% | 88.8% | 7.8 |
+| Food placed immediately offshore | 0 / 10 | 23.5% | 86.3% | 10.4 |
+| Food moved gradually across the channel | 10 / 10 | 24.9% | 85.6% | 146.3 |
+| Uniform random placement | 5 / 10 | 21.2% | 87.7% | 47.0 |
+
+The intended strategy therefore doubles the benchmark win rate and establishes roughly three times the far-island population of random play. Immediate offshore pressure creates the largest specialization among the three stationary controls, but its smaller population and failed colonies demonstrate that maximum aquatic pressure is not itself the solution.
+
+## Public playtest
+
+Play at **https://danjpark.github.io/critterevolve/**. A useful test session is:
+
+1. Play once using your first instinct.
+2. Retry and gradually move food from shore to deep water to the far island.
+3. During playback, select a critter and step through several ticks to check whether its choices make sense.
+4. At the result screen, use **Copy run data** and attach it to a [Critter Evolve playtest report](https://github.com/danjpark/critterevolve/issues/new).
+
+Useful feedback includes where you expected a critter to move, which equation or action surprised you, the run ID, whether you won, and what you wanted to try next.

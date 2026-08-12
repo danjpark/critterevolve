@@ -99,7 +99,7 @@ describe("Island Crossing game rules", () => {
       state = beginNextEra(state);
     }
     expect(state.phase, JSON.stringify(state.sim.metrics)).toBe("won");
-    expect(state.sim.metrics.targetPopulation).toBeGreaterThanOrEqual(20);
-    expect(state.sim.metrics.targetBirths).toBeGreaterThanOrEqual(5);
+    expect(state.sim.metrics.targetPopulation).toBeGreaterThanOrEqual(55);
+    expect(state.sim.metrics.targetBirths).toBeGreaterThanOrEqual(12);
   });
 });
