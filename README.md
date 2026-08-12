@@ -38,7 +38,7 @@ src/app     React orchestration and responsive styling
 
 The simulation has no DOM, React, or PixiJS dependencies. Rendering reads simulation state; it never decides outcomes.
 
-## Tick model v0.4
+## Tick model v0.5
 
 Critter Evolve uses the same central idea as a cellular automaton: state `N` is the complete input to one deterministic update, which produces state `N + 1`. A surviving critter keeps its ID, genome, position, heading, energy, age, and current food target. Its position can change only by the movement calculated for that one tick. A birth gets a new ID and a `parentId`; the renderer uses that relationship only to animate the child appearing near its parent.
 
@@ -118,7 +118,7 @@ Reproduction occurs after eating when energy is at least `12.5`, age is at least
 
 ### Action scope
 
-The current causal action set is **sense, steer/wander, move, eat, reproduce, and die**. Hunting, combat, cooperation, mating choice, and memory are not implemented in Island Crossing v0.4. They can be added later as explicit decision intents and resolution stages, but they should not be hidden inside rendering or silently alter this tick contract.
+The current causal action set is **sense, steer/wander, move, eat, reproduce, and die**. Hunting, combat, cooperation, mating choice, and memory are not implemented in Island Crossing v0.5. They can be added later as explicit decision intents and resolution stages, but they should not be hidden inside rendering or silently alter this tick contract.
 
 ### Determinism checks
 
@@ -151,6 +151,21 @@ Play at **https://danjpark.github.io/critterevolve/**. A useful test session is:
 1. Play once using your first instinct.
 2. Retry and gradually move food from shore to deep water to the far island.
 3. During playback, select a critter and step through several ticks to check whether its choices make sense.
-4. At the result screen, use **Copy run data** and attach it to a [Critter Evolve playtest report](https://github.com/danjpark/critterevolve/issues/new).
+4. At the result screen, use **Copy replay link** so someone else can rerun the experiment, or attach **Copy run data** to a [Critter Evolve playtest report](https://github.com/danjpark/critterevolve/issues/new).
 
 Useful feedback includes where you expected a critter to move, which equation or action surprised you, the run ID, whether you won, and what you wanted to try next.
+
+## Shareable deterministic replays
+
+Version 0.5 replay links encode only the causal inputs required to reproduce a run:
+
+```text
+format version
+game and level versions
+seed
+food placement era and coordinates
+```
+
+Opening a replay link restores each era's food automatically and locks editing. Playback speed, pause, Step tick, and the Critter lens remain available so another player can investigate the outcome. The simulation is recomputed from tick zero; positions, metrics, and results are not embedded in the URL.
+
+Replay payloads are URL-safe, limited to the mission's maximum 15 actions, and validated for version compatibility, map boundaries, per-era budgets, and overlapping placements. The deterministic test suite proves that encoding and replaying a complete five-era strategy recreates the original final state exactly.

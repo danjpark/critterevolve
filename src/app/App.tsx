@@ -10,6 +10,12 @@ import {
   runId,
   type IslandCrossingState,
 } from "../game/islandCrossing";
+import {
+  applyReplayEra,
+  createReplayGame,
+  replayFromUrl,
+  type ReplayPayload,
+} from "../game/replay";
 import { PixiWorld } from "../render/PixiWorld";
 import type { WorldTransition } from "../render/PixiWorld";
 import type { TrailPoint } from "../render/PixiWorld";
@@ -32,10 +38,13 @@ function freshSeed(): number {
 }
 
 export function App() {
-  const [game, setGame] = useState<IslandCrossingState>(() => createGame());
+  const replayLoad = useMemo(() => replayFromUrl(window.location.href), []);
+  const loadedReplay = replayLoad?.ok ? replayLoad.payload : undefined;
+  const [replay, setReplay] = useState<ReplayPayload | undefined>(loadedReplay);
+  const [game, setGame] = useState<IslandCrossingState>(() => loadedReplay ? createReplayGame(loadedReplay) : createGame());
   const [briefing, setBriefing] = useState(true);
   const [debug, setDebug] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(replayLoad && !replayLoad.ok ? replayLoad.reason : null);
   const [transition, setTransition] = useState<PlaybackTransition>();
   const [transitionProgress, setTransitionProgress] = useState(0);
   const progressRef = useRef(0);
@@ -46,7 +55,7 @@ export function App() {
   const metrics = game.sim.metrics;
   const remaining = remainingPlacements(game);
   const simulating = game.phase === "simulating" || Boolean(transition);
-  const placing = game.phase === "player" && remaining > 0 && !briefing;
+  const placing = game.phase === "player" && remaining > 0 && !briefing && !replay;
   const colonyProgress = Math.min(100, (metrics.targetPopulation / balance.targetPopulationRequired) * 100);
   const visibleTick = transition ? transition.to.tick : game.sim.tick;
   const visibleEraTick = game.eraTick + (transition ? 1 : 0);
@@ -195,6 +204,10 @@ export function App() {
   }
 
   function restart() {
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete("replay");
+    window.history.replaceState(null, "", cleanUrl);
+    setReplay(undefined);
     setGame(createGame(freshSeed()));
     setTransition(undefined);
     progressRef.current = 0;
@@ -204,6 +217,12 @@ export function App() {
     setSelectedCritterId(undefined);
     setSelectedTrail([]);
     setNotice("A new island, a new lineage.");
+  }
+
+  function continueEra() {
+    let next = beginNextEra(game);
+    if (replay) next = applyReplayEra(next, replay);
+    setGame(next);
   }
 
   return (
@@ -225,14 +244,15 @@ export function App() {
         <div className="header-meta">
           <button className="icon-button" onClick={() => setDebug((value) => !value)} aria-label="Toggle diagnostics">D</button>
           <span>SEED {game.seed}</span>
+          {replay && <span className="replay-badge">REPLAY</span>}
           <span>RUN {runId(game)}</span>
         </div>
       </header>
 
       <section className="mission-strip">
         <div>
-          <span className="eyebrow">Your objective</span>
-          <p>Establish a viable colony on the far island before the fifth era ends.</p>
+          <span className="eyebrow">{replay ? "Shared experiment" : "Your objective"}</span>
+          <p>{replay ? "Recorded food placements are locked in. Watch the same causal run unfold." : "Establish a viable colony on the far island before the fifth era ends."}</p>
         </div>
         <div className="colony-progress">
           <div className="progress-copy"><span>Colony</span><strong>{metrics.targetPopulation} / {balance.targetPopulationRequired}</strong></div>
@@ -293,8 +313,8 @@ export function App() {
 
         <aside className="sidebar sidebar--right">
           <div className="panel-heading">
-            <span className="eyebrow">{simulating ? "Simulation playback" : "Ecological tools"}</span>
-            <span className="tool-count">{simulating ? `${Math.round(eraProgress)}%` : `${remaining} LEFT`}</span>
+            <span className="eyebrow">{simulating ? "Simulation playback" : replay ? "Replay plan" : "Ecological tools"}</span>
+            <span className="tool-count">{simulating ? `${Math.round(eraProgress)}%` : replay ? `ERA ${game.era}` : `${remaining} LEFT`}</span>
           </div>
           {selectedCritterId !== undefined && (
             <section className="critter-inspector" aria-label={`Inspecting critter ${selectedCritterId}`}>
@@ -364,14 +384,26 @@ export function App() {
             </>
           ) : (
             <>
-              <div className={`tool-card ${placing ? "is-active" : ""}`}>
-                <div className="food-icon"><i /></div>
-                <div><strong>Place food</strong><span>Move resources. Create selection pressure.</span></div>
-              </div>
-              <p className="tool-help">Food lasts for two eras. Place it on land, at the shore, or offshore—then watch who reaches it.</p>
-              <div className="patch-pips" aria-label={`${remaining} food patches remaining`}>
-                {Array.from({ length: balance.foodPatchesPerEra }, (_, index) => <i key={index} className={index < remaining ? "is-full" : ""} />)}
-              </div>
+              {replay ? (
+                <>
+                  <div className="tool-card replay-card">
+                    <div className="replay-icon">R</div>
+                    <div><strong>Recorded food</strong><span>{replay.actions.filter((action) => action.era === game.era).length} placements restored for this era.</span></div>
+                  </div>
+                  <p className="tool-help">Replay mode locks player choices while preserving pause, speed, Step tick, and the Critter lens.</p>
+                </>
+              ) : (
+                <>
+                  <div className={`tool-card ${placing ? "is-active" : ""}`}>
+                    <div className="food-icon"><i /></div>
+                    <div><strong>Place food</strong><span>Move resources. Create selection pressure.</span></div>
+                  </div>
+                  <p className="tool-help">Food lasts for two eras. Place it on land, at the shore, or offshore—then watch who reaches it.</p>
+                  <div className="patch-pips" aria-label={`${remaining} food patches remaining`}>
+                    {Array.from({ length: balance.foodPatchesPerEra }, (_, index) => <i key={index} className={index < remaining ? "is-full" : ""} />)}
+                  </div>
+                </>
+              )}
               <div className="phase-divider" />
               <button className="button button--advance" onClick={handleAdvance} disabled={briefing || game.phase !== "player"}>
                 <span>{`Run era ${game.era}`}</span>
@@ -391,20 +423,20 @@ export function App() {
       {briefing && (
         <div className="overlay overlay--briefing" role="dialog" aria-modal="true" aria-labelledby="briefing-title">
           <div className="briefing-card">
-            <span className="eyebrow">Mission 01 · Five eras</span>
-            <h1 id="briefing-title">Teach them to cross.<br /><em>Without touching a trait.</em></h1>
-            <p>A small population is stranded on one island. Place food to shape where they forage, then watch every tick. Better swimmers will eat, survive, and pass on their advantage—but too much aquatic adaptation makes life on land harder.</p>
+            <span className="eyebrow">{replay ? `Shared run · Seed ${replay.seed}` : "Mission 01 · Five eras"}</span>
+            <h1 id="briefing-title">{replay ? <>Replay the experiment.<br /><em>Tick by exact tick.</em></> : <>Teach them to cross.<br /><em>Without touching a trait.</em></>}</h1>
+            <p>{replay ? `This link contains ${replay.actions.length} recorded food placements. The seed, decisions, simulation order, and random-number stream will reproduce the original outcome.` : "A small population is stranded on one island. Place food to shape where they forage, then watch every tick. Better swimmers will eat, survive, and pass on their advantage—but too much aquatic adaptation makes life on land harder."}</p>
             <div className="briefing-rules">
-              <span><b>01</b> Place 3 food patches</span>
+              <span><b>01</b> {replay ? "Restore every placement" : "Place 3 food patches"}</span>
               <span><b>02</b> Watch, pause, and step</span>
-              <span><b>03</b> Adapt, cross, establish</span>
+              <span><b>03</b> {replay ? "Verify the outcome" : "Adapt, cross, establish"}</span>
             </div>
-            <button className="button button--primary button--wide" onClick={() => setBriefing(false)}>Begin the experiment</button>
+            <button className="button button--primary button--wide" onClick={() => setBriefing(false)}>{replay ? "Begin replay" : "Begin the experiment"}</button>
           </div>
         </div>
       )}
 
-      {game.phase === "summary" && latestSummary && <EraSummary summary={latestSummary} onContinue={() => setGame(beginNextEra(game))} />}
+      {game.phase === "summary" && latestSummary && <EraSummary summary={latestSummary} onContinue={continueEra} />}
       {(game.phase === "won" || game.phase === "lost") && <ResultScreen state={game} onRestart={restart} />}
 
       {debug && (

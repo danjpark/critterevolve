@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { balance } from "../game/config";
 import type { IslandCrossingState } from "../game/islandCrossing";
 import { exportRun, runId } from "../game/islandCrossing";
+import { replayUrl } from "../game/replay";
 
 interface ResultScreenProps {
   state: IslandCrossingState;
@@ -10,12 +12,19 @@ interface ResultScreenProps {
 const percent = (value: number) => `${Math.round(value * 100)}%`;
 
 export function ResultScreen({ state, onRestart }: ResultScreenProps) {
+  const [copied, setCopied] = useState<"link" | "data">();
   const won = state.phase === "won";
   const start = state.summaries[0]?.before ?? state.sim.metrics;
   const final = state.sim.metrics;
 
   async function copyRun() {
     await navigator.clipboard.writeText(exportRun(state));
+    setCopied("data");
+  }
+
+  async function copyReplayLink() {
+    await navigator.clipboard.writeText(replayUrl(state, window.location.href));
+    setCopied("link");
   }
 
   return (
@@ -33,7 +42,8 @@ export function ResultScreen({ state, onRestart }: ResultScreenProps) {
         </div>
         <div className="result-actions">
           <button className="button button--primary" onClick={onRestart}>Try a new island</button>
-          <button className="button button--ghost" onClick={() => void copyRun()}>Copy run data</button>
+          <button className="button button--ghost" onClick={() => void copyReplayLink()}>{copied === "link" ? "Replay link copied" : "Copy replay link"}</button>
+          <button className="button button--ghost" onClick={() => void copyRun()}>{copied === "data" ? "Run data copied" : "Copy run data"}</button>
         </div>
         <span className="run-id">RUN {runId(state)}</span>
       </div>
