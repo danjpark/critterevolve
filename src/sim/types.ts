@@ -11,6 +11,8 @@ export interface Genome {
 
 export interface Critter extends Point {
   id: number;
+  /** Parent linkage is simulation data used for lineage replay and visualization. */
+  parentId?: number;
   genome: Genome;
   generation: number;
   habitat: Habitat;

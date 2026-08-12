@@ -1,4 +1,4 @@
-import { advanceGenerations, createSimulation } from "../sim/simulation";
+import { advanceGeneration, createSimulation } from "../sim/simulation";
 import type { FoodPatch, Habitat, Point, SimulationMetrics, SimulationState } from "../sim/types";
 import { balance } from "./config";
 import { habitatAt, islandCrossingLevel, simulationEnvironment } from "./level";
@@ -15,7 +15,7 @@ export interface EraSummary {
   after: SimulationMetrics;
 }
 
-export type GamePhase = "player" | "summary" | "won" | "lost";
+export type GamePhase = "player" | "simulating" | "summary" | "won" | "lost";
 
 export interface IslandCrossingState {
   seed: number;
@@ -24,6 +24,8 @@ export interface IslandCrossingState {
   sim: SimulationState;
   interventions: PlaceFoodIntervention[];
   summaries: EraSummary[];
+  eraGeneration: number;
+  eraStartMetrics?: SimulationMetrics;
   resultReason?: string;
 }
 
@@ -33,7 +35,7 @@ export type PlaceFoodResult =
 
 export function createGame(seed = 481021): IslandCrossingState {
   const sim = createSimulation(seed, simulationEnvironment(islandCrossingLevel.naturalFoods.map((food) => ({ ...food }))));
-  return { seed, era: 1, phase: "player", sim, interventions: [], summaries: [] };
+  return { seed, era: 1, phase: "player", sim, interventions: [], summaries: [], eraGeneration: 0 };
 }
 
 export function placementsThisEra(state: IslandCrossingState): number {
@@ -87,6 +89,16 @@ export function isColonyEstablished(metrics: SimulationMetrics): boolean {
   );
 }
 
+export function beginEraSimulation(state: IslandCrossingState): IslandCrossingState {
+  if (state.phase !== "player") return state;
+  return {
+    ...state,
+    phase: "simulating",
+    eraGeneration: 0,
+    eraStartMetrics: state.sim.metrics,
+  };
+}
+
 function lossReason(metrics: SimulationMetrics): string {
   if (metrics.aquaticMean > 0.63 && metrics.landPerformance < 0.66) {
     return "Your critters became powerful swimmers, but gave up too much land efficiency to sustain the new colony.";
@@ -100,25 +112,40 @@ function lossReason(metrics: SimulationMetrics): string {
   return "The population adapted, but not enough swimmers completed the channel crossing in time.";
 }
 
-export function advanceEra(state: IslandCrossingState): IslandCrossingState {
-  if (state.phase !== "player") return state;
-  const before = state.sim.metrics;
+export function advanceEraGeneration(state: IslandCrossingState): IslandCrossingState {
+  if (state.phase !== "simulating") return state;
   const environment = simulationEnvironment(activeFoods(state));
-  const sim = advanceGenerations(state.sim, environment, balance.generationsPerEra);
+  const sim = advanceGeneration(state.sim, environment);
+  const eraGeneration = state.eraGeneration + 1;
+
+  if (eraGeneration < balance.generationsPerEra) {
+    return { ...state, sim, eraGeneration };
+  }
+
+  const before = state.eraStartMetrics ?? state.sim.metrics;
   const summary = { era: state.era, before, after: sim.metrics };
   const summaries = [...state.summaries, summary];
   if (isColonyEstablished(sim.metrics)) {
-    return { ...state, sim, summaries, phase: "won", resultReason: "A self-sustaining colony has taken root." };
+    return { ...state, sim, summaries, eraGeneration, phase: "won", resultReason: "A self-sustaining colony has taken root." };
   }
   if (state.era >= balance.maxEras) {
-    return { ...state, sim, summaries, phase: "lost", resultReason: lossReason(sim.metrics) };
+    return { ...state, sim, summaries, eraGeneration, phase: "lost", resultReason: lossReason(sim.metrics) };
   }
-  return { ...state, sim, summaries, phase: "summary" };
+  return { ...state, sim, summaries, eraGeneration, phase: "summary" };
+}
+
+/** Test/replay helper. The browser client uses visible generation playback. */
+export function advanceEra(state: IslandCrossingState): IslandCrossingState {
+  let next = beginEraSimulation(state);
+  for (let generation = 0; generation < balance.generationsPerEra; generation += 1) {
+    next = advanceEraGeneration(next);
+  }
+  return next;
 }
 
 export function beginNextEra(state: IslandCrossingState): IslandCrossingState {
   if (state.phase !== "summary") return state;
-  return { ...state, era: state.era + 1, phase: "player" };
+  return { ...state, era: state.era + 1, phase: "player", eraGeneration: 0, eraStartMetrics: undefined };
 }
 
 export function runId(state: IslandCrossingState): string {

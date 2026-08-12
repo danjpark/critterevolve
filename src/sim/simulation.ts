@@ -157,6 +157,7 @@ export function advanceGeneration(state: SimulationState, environment: Simulatio
     const actualHabitat = environment.habitatAt(position);
     nextCritters.push({
       id: state.nextCritterId + index,
+      parentId: parentEntry.critter.id,
       x: position.x,
       y: position.y,
       genome: { aquaticMovement: trait },

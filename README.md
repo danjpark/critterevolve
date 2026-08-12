@@ -19,11 +19,12 @@ Play the public build at **https://danjpark.github.io/critterevolve/**.
 
 - Place up to three food patches per era.
 - Food persists for two eras.
-- Advance ten generations at a time, for at most five eras.
+- Run ten generations per era as 240 visible deterministic ticks, for at most five eras.
+- Pause at any moment, advance one tick at a time, or watch at 1×, 4×, or 12× speed.
 - Establish at least 20 critters on the target island, record five local births, and sustain the population for three generations.
 - Swimming ability is inherited and mutable. Better swimmers pay a terrestrial-efficiency cost.
 
-The `D` key toggles deterministic simulation diagnostics. The run ID and exported run data capture the seed, level version, and every player intervention for reproduction.
+The `D` key toggles deterministic simulation diagnostics. Playback speed changes only presentation; the run ID and exported run data capture the seed, level version, and every player intervention for exact reproduction.
 
 ## Architecture
 

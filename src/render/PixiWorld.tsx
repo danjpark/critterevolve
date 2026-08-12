@@ -4,12 +4,37 @@ import type { IslandCrossingState } from "../game/islandCrossing";
 import { activeFoods } from "../game/islandCrossing";
 import { islandCrossingLevel } from "../game/level";
 import { palette } from "../game/config";
-import type { Point } from "../sim/types";
+import type { Critter, Point, SimulationState } from "../sim/types";
+
+export interface WorldTransition {
+  from: SimulationState;
+  to: SimulationState;
+}
 
 interface PixiWorldProps {
   state: IslandCrossingState;
   onPlaceFood(point: Point): void;
   placementEnabled: boolean;
+  transition?: WorldTransition;
+  transitionProgress: number;
+}
+
+interface WorldLayers {
+  terrain: Container;
+  foods: Container;
+  trails: Container;
+  critters: Container;
+}
+
+interface CritterMotion {
+  sprite: Graphics;
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  curve: number;
+  aquatic: number;
+  crossesWater: boolean;
 }
 
 const textStyle = (size: number, color: number = palette.white, weight: "normal" | "bold" = "normal") =>
@@ -153,9 +178,7 @@ function drawFoods(layer: Container, state: IslandCrossingState): void {
   }
 }
 
-function drawCritters(layer: Container, state: IslandCrossingState): void {
-  const sorted = [...state.sim.critters].sort((a, b) => a.y - b.y);
-  for (const critter of sorted) {
+function createCritterGraphic(critter: Critter): Graphics {
     const trait = critter.genome.aquaticMovement;
     const color = mixColor(palette.critterLand, palette.critterWater, trait);
     const body = new Graphics();
@@ -170,27 +193,110 @@ function drawCritters(layer: Container, state: IslandCrossingState): void {
         .closePath()
         .fill({ color, alpha: 0.8 });
     }
+    return body;
+}
+
+function clearLayer(layer: Container): void {
+  layer.removeChildren().forEach((child) => child.destroy({ children: true }));
+}
+
+function drawRestingCritters(layer: Container, critters: Critter[]): void {
+  clearLayer(layer);
+  const sorted = [...critters].sort((a, b) => a.y - b.y);
+  for (const critter of sorted) {
+    const body = createCritterGraphic(critter);
     body.position.set(critter.x, critter.y);
     body.rotation = ((critter.id * 97) % 31) / 45 - 0.34;
     layer.addChild(body);
   }
 }
 
-function redraw(stage: Container, state: IslandCrossingState): void {
-  stage.removeChildren().forEach((child) => child.destroy({ children: true }));
-  drawTerrain(stage);
-  drawFoods(stage, state);
-  drawCritters(stage, state);
+function buildCritterTransition(
+  critterLayer: Container,
+  trailLayer: Container,
+  transition: WorldTransition,
+): CritterMotion[] {
+  clearLayer(critterLayer);
+  clearLayer(trailLayer);
+  const parents = new Map(transition.from.critters.map((critter) => [critter.id, critter]));
+  const motions: CritterMotion[] = [];
+  const sorted = [...transition.to.critters].sort((a, b) => a.y - b.y);
+
+  for (const critter of sorted) {
+    const parent = (critter.parentId === undefined ? undefined : parents.get(critter.parentId)) ?? critter;
+    const crossesWater = parent.habitat !== critter.habitat || critter.habitat === "shallow" || critter.habitat === "deep";
+    const body = createCritterGraphic(critter);
+    body.position.set(parent.x, parent.y);
+    body.alpha = 0.72;
+    critterLayer.addChild(body);
+
+    const curve = (((critter.id * 37) % 23) - 11) * 1.35;
+    motions.push({
+      sprite: body,
+      fromX: parent.x,
+      fromY: parent.y,
+      toX: critter.x,
+      toY: critter.y,
+      curve,
+      aquatic: critter.genome.aquaticMovement,
+      crossesWater,
+    });
+
+    const distance = Math.hypot(critter.x - parent.x, critter.y - parent.y);
+    if ((crossesWater || distance > 120) && critter.id % 3 === 0) {
+      const reachedTarget = critter.habitat === "target" && parent.habitat !== "target";
+      const trailColor = reachedTarget ? palette.food : mixColor(palette.critterLand, palette.critterWater, critter.genome.aquaticMovement);
+      const trail = new Graphics()
+        .moveTo(parent.x, parent.y)
+        .quadraticCurveTo(
+          (parent.x + critter.x) / 2,
+          (parent.y + critter.y) / 2 + curve,
+          critter.x,
+          critter.y,
+        )
+        .stroke({ color: trailColor, width: reachedTarget ? 2.2 : 1.1, alpha: reachedTarget ? 0.48 : 0.15 });
+      trailLayer.addChild(trail);
+    }
+  }
+  return motions;
 }
 
-export function PixiWorld({ state, onPlaceFood, placementEnabled }: PixiWorldProps) {
+function updateCritterTransition(motions: CritterMotion[], progress: number): void {
+  const clamped = Math.min(1, Math.max(0, progress));
+  for (const motion of motions) {
+    if (motion.sprite.destroyed || !motion.sprite.position) continue;
+    // Aquatic adaptation changes how confidently movement unfolds in water,
+    // while the final position remains a deterministic simulation outcome.
+    const exponent = motion.crossesWater ? 1.7 - motion.aquatic * 0.95 : 1.12;
+    const travel = clamped ** exponent;
+    const eased = travel * travel * (3 - 2 * travel);
+    const x = motion.fromX + (motion.toX - motion.fromX) * eased;
+    const y = motion.fromY + (motion.toY - motion.fromY) * eased + Math.sin(Math.PI * eased) * motion.curve;
+    motion.sprite.position.set(x, y);
+    motion.sprite.rotation = Math.atan2(motion.toY - motion.fromY, motion.toX - motion.fromX) + Math.PI;
+    motion.sprite.alpha = Math.min(0.96, 0.68 + clamped * 0.36);
+    motion.sprite.scale.set(0.78 + Math.min(1, clamped * 3) * 0.22);
+  }
+}
+
+export function PixiWorld({
+  state,
+  onPlaceFood,
+  placementEnabled,
+  transition,
+  transitionProgress,
+}: PixiWorldProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
+  const layersRef = useRef<WorldLayers | null>(null);
+  const motionsRef = useRef<CritterMotion[]>([]);
   const stateRef = useRef(state);
+  const transitionRef = useRef(transition);
   const handlerRef = useRef(onPlaceFood);
   const enabledRef = useRef(placementEnabled);
 
   stateRef.current = state;
+  transitionRef.current = transition;
   handlerRef.current = onPlaceFood;
   enabledRef.current = placementEnabled;
 
@@ -216,18 +322,34 @@ export function PixiWorld({ state, onPlaceFood, placementEnabled }: PixiWorldPro
         appRef.current = app;
         app.canvas.setAttribute("aria-label", "Island Crossing habitat. Click to place food.");
         hostRef.current.appendChild(app.canvas);
+        const layers: WorldLayers = {
+          terrain: new Container(),
+          foods: new Container(),
+          trails: new Container(),
+          critters: new Container(),
+        };
+        layersRef.current = layers;
+        app.stage.addChild(layers.terrain, layers.foods, layers.trails, layers.critters);
+        drawTerrain(layers.terrain);
+        drawFoods(layers.foods, stateRef.current);
+        if (transitionRef.current) {
+          motionsRef.current = buildCritterTransition(layers.critters, layers.trails, transitionRef.current);
+        } else {
+          drawRestingCritters(layers.critters, stateRef.current.sim.critters);
+        }
         app.stage.eventMode = "static";
         app.stage.hitArea = app.screen;
         app.stage.on("pointertap", (event) => {
           if (!enabledRef.current) return;
           handlerRef.current({ x: event.global.x, y: event.global.y });
         });
-        redraw(app.stage, stateRef.current);
       });
 
     return () => {
       cancelled = true;
       appRef.current = null;
+      layersRef.current = null;
+      motionsRef.current = [];
       // Pixi v8 initializes asynchronously. Destroying before init resolves
       // breaks React StrictMode's intentional development remount.
       if (initialized) app.destroy(true, { children: true });
@@ -235,8 +357,27 @@ export function PixiWorld({ state, onPlaceFood, placementEnabled }: PixiWorldPro
   }, []);
 
   useEffect(() => {
-    if (appRef.current) redraw(appRef.current.stage, state);
-  }, [state]);
+    const layers = layersRef.current;
+    if (!layers) return;
+    clearLayer(layers.foods);
+    drawFoods(layers.foods, state);
+    if (!transition) {
+      motionsRef.current = [];
+      clearLayer(layers.trails);
+      drawRestingCritters(layers.critters, state.sim.critters);
+    }
+  }, [state, transition]);
+
+  useEffect(() => {
+    const layers = layersRef.current;
+    if (!layers || !transition) return;
+    motionsRef.current = buildCritterTransition(layers.critters, layers.trails, transition);
+    updateCritterTransition(motionsRef.current, transitionProgress);
+  }, [transition?.from.generation, transition?.to.generation]);
+
+  useEffect(() => {
+    updateCritterTransition(motionsRef.current, transitionProgress);
+  }, [transitionProgress]);
 
   return <div className={`world-canvas ${placementEnabled ? "is-placing" : ""}`} ref={hostRef} />;
 }

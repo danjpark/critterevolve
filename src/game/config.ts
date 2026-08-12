@@ -1,5 +1,5 @@
 export const balance = {
-  gameVersion: "0.1.0",
+  gameVersion: "0.2.0",
   levelVersion: "island-crossing-1",
   maxEras: 5,
   foodPatchesPerEra: 3,
