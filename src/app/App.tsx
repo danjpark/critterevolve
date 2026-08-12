@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { balance } from "../game/config";
 import {
-  advanceEraGeneration,
+  advanceEraTick,
   beginEraSimulation,
   beginNextEra,
   createGame,
@@ -18,7 +18,7 @@ import { Metric } from "../ui/Metric";
 import { ResultScreen } from "../ui/ResultScreen";
 
 const percent = (value: number) => `${Math.round(value * 100)}%`;
-const GENERATION_DURATION_MS = 1400;
+const TICK_DURATION_MS = 120;
 
 interface PlaybackTransition extends WorldTransition {
   toGame: IslandCrossingState;
@@ -45,25 +45,27 @@ export function App() {
   const simulating = game.phase === "simulating" || Boolean(transition);
   const placing = game.phase === "player" && remaining > 0 && !briefing;
   const colonyProgress = Math.min(100, (metrics.targetPopulation / balance.targetPopulationRequired) * 100);
-  const visibleTick = game.sim.tick + (transition ? Math.floor(transitionProgress * balance.ticksPerGeneration) : 0);
-  const eraTick = game.eraGeneration * balance.ticksPerGeneration + (transition ? Math.floor(transitionProgress * balance.ticksPerGeneration) : 0);
-  const totalEraTicks = balance.generationsPerEra * balance.ticksPerGeneration;
-  const eraProgress = Math.min(100, (eraTick / totalEraTicks) * 100);
+  const visibleTick = transition ? transition.to.tick : game.sim.tick;
+  const visibleEraTick = game.eraTick + (transition ? 1 : 0);
+  const eraProgress = Math.min(100, (visibleEraTick / balance.ticksPerEra) * 100);
 
   const observation = useMemo(() => {
-    if (!transition) return undefined;
-    const before = transition.from.metrics;
-    const after = transition.to.metrics;
-    const waterBefore = Math.round(before.waterActivity * before.population);
-    const waterAfter = Math.round(after.waterActivity * after.population);
+    const observed = transition?.to ?? (game.sim.tick > 0 ? game.sim : undefined);
+    if (!observed) return undefined;
+    const before = transition?.from.metrics ?? observed.metrics;
+    const after = observed.metrics;
+    const events = observed.lastTickEvents;
     return {
-      waterDelta: waterAfter - waterBefore,
-      crossings: Math.max(0, after.targetPopulation - before.targetPopulation),
-      localBirths: Math.max(0, after.targetBirths - before.targetBirths),
-      populationDelta: after.population - before.population,
+      moved: events.moved,
+      ate: events.ate,
+      waterEntries: events.waterEntries,
+      crossings: events.crossings,
+      localBirths: events.targetBirths,
+      births: events.births,
+      deaths: events.deaths,
       swimmingDelta: after.aquaticMean - before.aquaticMean,
     };
-  }, [transition]);
+  }, [game.sim, transition]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -79,11 +81,11 @@ export function App() {
     return () => window.clearTimeout(timeout);
   }, [notice]);
 
-  // Queue one seeded generation at a time. Playback speed changes only how
+  // Queue one seeded simulation tick at a time. Playback speed changes only how
   // quickly fixed ticks are displayed, never simulation outcomes or RNG order.
   useEffect(() => {
     if (game.phase !== "simulating" || paused || transition) return;
-    const toGame = advanceEraGeneration(game);
+    const toGame = advanceEraTick(game);
     progressRef.current = 0;
     setTransitionProgress(0);
     setTransition({ from: game.sim, to: toGame.sim, toGame });
@@ -98,7 +100,7 @@ export function App() {
       previousTime = time;
       const nextProgress = Math.min(
         1,
-        progressRef.current + elapsed / (GENERATION_DURATION_MS / playbackSpeed),
+        progressRef.current + elapsed / (TICK_DURATION_MS / playbackSpeed),
       );
       progressRef.current = nextProgress;
       setTransitionProgress(nextProgress);
@@ -138,21 +140,28 @@ export function App() {
 
   function stepOneTick() {
     setPaused(true);
-    if (!transition && game.phase === "simulating") {
-      const toGame = advanceEraGeneration(game);
-      const firstTick = 1 / balance.ticksPerGeneration;
-      progressRef.current = firstTick;
-      setTransitionProgress(firstTick);
-      setTransition({ from: game.sim, to: toGame.sim, toGame });
-      return;
-    }
-    if (!transition) return;
-    const nextProgress = Math.min(1, progressRef.current + 1 / balance.ticksPerGeneration);
-    progressRef.current = nextProgress;
-    setTransitionProgress(nextProgress);
-    if (nextProgress >= 1) {
+    if (transition) {
       setGame(transition.toGame);
       setTransition(undefined);
+      progressRef.current = 0;
+      setTransitionProgress(0);
+      return;
+    }
+    if (game.phase !== "simulating") return;
+    setGame(advanceEraTick(game));
+  }
+
+  function togglePlayback() {
+    if (paused) {
+      setPaused(false);
+      return;
+    }
+    setPaused(true);
+    if (transition) {
+      setGame(transition.toGame);
+      setTransition(undefined);
+      progressRef.current = 0;
+      setTransitionProgress(0);
     }
   }
 
@@ -241,7 +250,7 @@ export function App() {
           {placing && <div className="placement-hint"><i /> Click anywhere to place food</div>}
           {simulating && (
             <div className="live-sim-bar">
-              <div><i /><strong>LIVE</strong><span>GEN {Math.min(game.eraGeneration + 1, balance.generationsPerEra)} / {balance.generationsPerEra}</span><span>TICK {visibleTick}</span></div>
+              <div><i /><strong>LIVE</strong><span>ERA TICK {Math.min(visibleEraTick, balance.ticksPerEra)} / {balance.ticksPerEra}</span><span>GLOBAL {visibleTick}</span></div>
               <div className="live-sim-track"><i style={{ width: `${eraProgress}%` }} /></div>
             </div>
           )}
@@ -256,11 +265,11 @@ export function App() {
           {simulating ? (
             <>
               <div className="playback-status">
-                <span>Generation</span><strong>{Math.min(game.eraGeneration + 1, balance.generationsPerEra)} / {balance.generationsPerEra}</strong>
-                <span>Deterministic tick</span><strong>{visibleTick}</strong>
+                <span>Era tick</span><strong>{Math.min(visibleEraTick, balance.ticksPerEra)} / {balance.ticksPerEra}</strong>
+                <span>Global tick</span><strong>{visibleTick}</strong>
               </div>
               <div className="playback-controls">
-                <button onClick={() => setPaused((value) => !value)} aria-label={paused ? "Resume simulation" : "Pause simulation"}>
+                <button onClick={togglePlayback} aria-label={paused ? "Resume simulation" : "Pause simulation"}>
                   {paused ? "▶" : "Ⅱ"}<span>{paused ? "Play" : "Pause"}</span>
                 </button>
                 <button onClick={stepOneTick} aria-label="Advance one simulation tick">›<span>Step tick</span></button>
@@ -275,13 +284,16 @@ export function App() {
                 <span className="eyebrow">What is happening</span>
                 {observation ? (
                   <>
-                    <div className={observation.waterDelta >= 0 ? "is-positive" : "is-negative"}><span>In the water</span><strong>{observation.waterDelta >= 0 ? "+" : ""}{observation.waterDelta}</strong></div>
+                    <div><span>Moved</span><strong>{observation.moved}</strong></div>
+                    <div className={observation.ate > 0 ? "is-positive" : ""}><span>Ate</span><strong>{observation.ate}</strong></div>
+                    <div className={observation.waterEntries > 0 ? "is-positive" : ""}><span>Entered water</span><strong>{observation.waterEntries}</strong></div>
                     <div className={observation.crossings > 0 ? "is-positive" : ""}><span>New crossings</span><strong>+{observation.crossings}</strong></div>
                     <div className={observation.localBirths > 0 ? "is-positive" : ""}><span>Far-shore births</span><strong>+{observation.localBirths}</strong></div>
-                    <div className={observation.swimmingDelta >= 0 ? "is-positive" : "is-negative"}><span>Swimming shift</span><strong>{observation.swimmingDelta >= 0 ? "+" : ""}{(observation.swimmingDelta * 100).toFixed(1)}%</strong></div>
-                    <div className={observation.populationDelta >= 0 ? "is-positive" : "is-negative"}><span>Population</span><strong>{observation.populationDelta >= 0 ? "+" : ""}{observation.populationDelta}</strong></div>
+                    <div className={observation.births > 0 ? "is-positive" : ""}><span>All births</span><strong>+{observation.births}</strong></div>
+                    <div className={observation.deaths > 0 ? "is-negative" : ""}><span>Deaths</span><strong>−{observation.deaths}</strong></div>
+                    <div className={observation.swimmingDelta >= 0 ? "is-positive" : "is-negative"}><span>Trait shift</span><strong>{observation.swimmingDelta >= 0 ? "+" : ""}{(observation.swimmingDelta * 100).toFixed(2)}%</strong></div>
                   </>
-                ) : <p>Preparing the next deterministic generation…</p>}
+                ) : <p>Preparing the next deterministic tick…</p>}
               </div>
               <p className="advance-help">Orange lineages favor land; blue lineages move more confidently through water. Gold trails mark a crossing.</p>
             </>
@@ -300,7 +312,7 @@ export function App() {
                 <span>{`Run era ${game.era}`}</span>
                 <i aria-hidden="true">→</i>
               </button>
-              <p className="advance-help">Runs {balance.generationsPerEra} visible generations. Pause or step through any tick.</p>
+              <p className="advance-help">Runs {balance.ticksPerEra} real simulation ticks. Every position persists into the next tick.</p>
             </>
           )}
         </aside>
@@ -334,13 +346,13 @@ export function App() {
         <div className="debug-panel">
           <strong>SIM DIAGNOSTICS</strong>
           <span>seed {game.seed}</span><span>era {game.era} / tick {visibleTick}</span>
-          <span>generation {game.sim.generation}</span><span>population {metrics.population}</span>
+          <span>lineage depth {game.sim.generation}</span><span>population {metrics.population}</span>
           <span>aquatic μ {metrics.aquaticMean.toFixed(4)}</span><span>median {metrics.aquaticMedian.toFixed(4)}</span>
           <span>min/max {metrics.aquaticMin.toFixed(3)} / {metrics.aquaticMax.toFixed(3)}</span>
           <span>land eff {metrics.landPerformance.toFixed(4)}</span><span>water use {metrics.waterActivity.toFixed(4)}</span>
           <span>target pop {metrics.targetPopulation}</span><span>target births {metrics.targetBirths}</span>
-          <span>persistence {metrics.targetPersistenceGenerations} gen</span><span>food actions {game.interventions.length}</span>
-          <span>rng {game.sim.rngState}</span><span>24 deterministic ticks/gen</span>
+          <span>persistence {metrics.targetPersistenceTicks} ticks</span><span>food actions {game.interventions.length}</span>
+          <span>rng {game.sim.rngState}</span><span>1 decision / tick / critter</span>
         </div>
       )}
     </main>

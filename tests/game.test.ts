@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   advanceEra,
-  advanceEraGeneration,
+  advanceEraTick,
   beginEraSimulation,
   beginNextEra,
   createGame,
@@ -55,7 +55,7 @@ describe("Island Crossing game rules", () => {
     expect(state.resultReason).toMatch(/land-adapted|cross/i);
   });
 
-  it("exposes the same deterministic era one generation at a time", () => {
+  it("exposes the same deterministic era one causal tick at a time", () => {
     let prepared = createGame(481021);
     prepared = place(prepared, 390, 180);
     prepared = place(prepared, 415, 320);
@@ -64,13 +64,14 @@ describe("Island Crossing game rules", () => {
     const instant = advanceEra(prepared);
     let visible = beginEraSimulation(prepared);
     expect(visible.phase).toBe("simulating");
-    for (let generation = 0; generation < 10; generation += 1) {
-      visible = advanceEraGeneration(visible);
-      expect(visible.sim.tick).toBe((generation + 1) * 24);
+    const startingIds = new Set(visible.sim.critters.map((critter) => critter.id));
+    for (let tick = 0; tick < 240; tick += 1) {
+      visible = advanceEraTick(visible);
+      expect(visible.sim.tick).toBe(tick + 1);
     }
 
     expect(visible).toEqual(instant);
-    expect(visible.sim.critters.every((critter) => critter.parentId !== undefined)).toBe(true);
+    expect(visible.sim.critters.some((critter) => startingIds.has(critter.id))).toBe(true);
   });
 
   it("produces stable compact run IDs and complete replay data", () => {

@@ -11,11 +11,16 @@ export interface Genome {
 
 export interface Critter extends Point {
   id: number;
-  /** Parent linkage is simulation data used for lineage replay and visualization. */
   parentId?: number;
   genome: Genome;
   generation: number;
   habitat: Habitat;
+  heading: number;
+  energy: number;
+  age: number;
+  reproductionCooldown: number;
+  targetFoodId?: string;
+  lastAction: "moving" | "eating" | "reproducing" | "wandering";
 }
 
 export interface FoodPatch extends Point {
@@ -37,7 +42,17 @@ export interface SimulationMetrics {
   reachedTarget: number;
   targetPopulation: number;
   targetBirths: number;
-  targetPersistenceGenerations: number;
+  targetPersistenceTicks: number;
+}
+
+export interface TickEvents {
+  moved: number;
+  ate: number;
+  waterEntries: number;
+  crossings: number;
+  births: number;
+  targetBirths: number;
+  deaths: number;
 }
 
 export interface SimulationState {
@@ -47,8 +62,10 @@ export interface SimulationState {
   generation: number;
   nextCritterId: number;
   critters: Critter[];
+  foodLevels: Record<string, number>;
   targetBirths: number;
-  targetPersistenceGenerations: number;
+  targetPersistenceTicks: number;
+  lastTickEvents: TickEvents;
   metrics: SimulationMetrics;
 }
 

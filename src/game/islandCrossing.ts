@@ -1,4 +1,4 @@
-import { advanceGeneration, createSimulation } from "../sim/simulation";
+import { advanceTick, createSimulation } from "../sim/simulation";
 import type { FoodPatch, Habitat, Point, SimulationMetrics, SimulationState } from "../sim/types";
 import { balance } from "./config";
 import { habitatAt, islandCrossingLevel, simulationEnvironment } from "./level";
@@ -24,7 +24,7 @@ export interface IslandCrossingState {
   sim: SimulationState;
   interventions: PlaceFoodIntervention[];
   summaries: EraSummary[];
-  eraGeneration: number;
+  eraTick: number;
   eraStartMetrics?: SimulationMetrics;
   resultReason?: string;
 }
@@ -35,7 +35,7 @@ export type PlaceFoodResult =
 
 export function createGame(seed = 481021): IslandCrossingState {
   const sim = createSimulation(seed, simulationEnvironment(islandCrossingLevel.naturalFoods.map((food) => ({ ...food }))));
-  return { seed, era: 1, phase: "player", sim, interventions: [], summaries: [], eraGeneration: 0 };
+  return { seed, era: 1, phase: "player", sim, interventions: [], summaries: [], eraTick: 0 };
 }
 
 export function placementsThisEra(state: IslandCrossingState): number {
@@ -69,9 +69,10 @@ export function placeFood(state: IslandCrossingState, point: Point): PlaceFoodRe
 export function activeFoods(state: IslandCrossingState): FoodPatch[] {
   const oldestEra = state.era - balance.foodLifetimeEras + 1;
   const playerFoods: FoodPatch[] = state.interventions
-    .filter((item) => item.era >= oldestEra && item.era <= state.era)
-    .map((item, index) => ({
-      id: `player-${item.era}-${index}-${item.x}-${item.y}`,
+    .map((item, interventionIndex) => ({ item, interventionIndex }))
+    .filter(({ item }) => item.era >= oldestEra && item.era <= state.era)
+    .map(({ item, interventionIndex }) => ({
+      id: `player-${item.era}-${interventionIndex}-${item.x}-${item.y}`,
       x: item.x,
       y: item.y,
       value: balance.playerFoodValue,
@@ -85,7 +86,7 @@ export function isColonyEstablished(metrics: SimulationMetrics): boolean {
   return (
     metrics.targetPopulation >= balance.targetPopulationRequired &&
     metrics.targetBirths >= balance.targetBirthsRequired &&
-    metrics.targetPersistenceGenerations >= balance.targetPersistenceRequired
+    metrics.targetPersistenceTicks >= balance.targetPersistenceRequiredTicks
   );
 }
 
@@ -94,7 +95,7 @@ export function beginEraSimulation(state: IslandCrossingState): IslandCrossingSt
   return {
     ...state,
     phase: "simulating",
-    eraGeneration: 0,
+    eraTick: 0,
     eraStartMetrics: state.sim.metrics,
   };
 }
@@ -112,40 +113,40 @@ function lossReason(metrics: SimulationMetrics): string {
   return "The population adapted, but not enough swimmers completed the channel crossing in time.";
 }
 
-export function advanceEraGeneration(state: IslandCrossingState): IslandCrossingState {
+export function advanceEraTick(state: IslandCrossingState): IslandCrossingState {
   if (state.phase !== "simulating") return state;
   const environment = simulationEnvironment(activeFoods(state));
-  const sim = advanceGeneration(state.sim, environment);
-  const eraGeneration = state.eraGeneration + 1;
+  const sim = advanceTick(state.sim, environment);
+  const eraTick = state.eraTick + 1;
 
-  if (eraGeneration < balance.generationsPerEra) {
-    return { ...state, sim, eraGeneration };
+  if (eraTick < balance.ticksPerEra) {
+    return { ...state, sim, eraTick };
   }
 
   const before = state.eraStartMetrics ?? state.sim.metrics;
   const summary = { era: state.era, before, after: sim.metrics };
   const summaries = [...state.summaries, summary];
   if (isColonyEstablished(sim.metrics)) {
-    return { ...state, sim, summaries, eraGeneration, phase: "won", resultReason: "A self-sustaining colony has taken root." };
+    return { ...state, sim, summaries, eraTick, phase: "won", resultReason: "A self-sustaining colony has taken root." };
   }
   if (state.era >= balance.maxEras) {
-    return { ...state, sim, summaries, eraGeneration, phase: "lost", resultReason: lossReason(sim.metrics) };
+    return { ...state, sim, summaries, eraTick, phase: "lost", resultReason: lossReason(sim.metrics) };
   }
-  return { ...state, sim, summaries, eraGeneration, phase: "summary" };
+  return { ...state, sim, summaries, eraTick, phase: "summary" };
 }
 
-/** Test/replay helper. The browser client uses visible generation playback. */
+/** Test/replay helper. The browser client calls the same update one visible tick at a time. */
 export function advanceEra(state: IslandCrossingState): IslandCrossingState {
   let next = beginEraSimulation(state);
-  for (let generation = 0; generation < balance.generationsPerEra; generation += 1) {
-    next = advanceEraGeneration(next);
+  for (let tick = 0; tick < balance.ticksPerEra; tick += 1) {
+    next = advanceEraTick(next);
   }
   return next;
 }
 
 export function beginNextEra(state: IslandCrossingState): IslandCrossingState {
   if (state.phase !== "summary") return state;
-  return { ...state, era: state.era + 1, phase: "player", eraGeneration: 0, eraStartMetrics: undefined };
+  return { ...state, era: state.era + 1, phase: "player", eraTick: 0, eraStartMetrics: undefined };
 }
 
 export function runId(state: IslandCrossingState): string {

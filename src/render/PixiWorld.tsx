@@ -3,7 +3,7 @@ import { Application, Container, Graphics, Text, TextStyle } from "pixi.js";
 import type { IslandCrossingState } from "../game/islandCrossing";
 import { activeFoods } from "../game/islandCrossing";
 import { islandCrossingLevel } from "../game/level";
-import { palette } from "../game/config";
+import { balance, palette } from "../game/config";
 import type { Critter, Point, SimulationState } from "../sim/types";
 
 export interface WorldTransition {
@@ -35,6 +35,8 @@ interface CritterMotion {
   curve: number;
   aquatic: number;
   crossesWater: boolean;
+  isNewborn: boolean;
+  action: Critter["lastAction"];
 }
 
 const textStyle = (size: number, color: number = palette.white, weight: "normal" | "bold" = "normal") =>
@@ -158,6 +160,8 @@ function drawTerrain(layer: Container): void {
 function drawFoods(layer: Container, state: IslandCrossingState): void {
   for (const food of activeFoods(state)) {
     const isPlayer = food.source === "player";
+    const capacity = food.value * balance.foodCapacityMultiplier;
+    const fullness = Math.max(0.12, Math.min(1, (state.sim.foodLevels[food.id] ?? capacity) / capacity));
     const marker = new Graphics()
       .circle(0, 0, isPlayer ? 21 : 14)
       .fill({ color: palette.foodGlow, alpha: isPlayer ? 0.13 : 0.09 })
@@ -166,6 +170,8 @@ function drawFoods(layer: Container, state: IslandCrossingState): void {
       .circle(-2, -2, isPlayer ? 3 : 2)
       .fill({ color: palette.white, alpha: 0.7 });
     marker.position.set(food.x, food.y);
+    marker.scale.set(0.65 + fullness * 0.35);
+    marker.alpha = 0.38 + fullness * 0.62;
     layer.addChild(marker);
 
     if (isPlayer) {
@@ -223,7 +229,9 @@ function buildCritterTransition(
   const sorted = [...transition.to.critters].sort((a, b) => a.y - b.y);
 
   for (const critter of sorted) {
-    const parent = (critter.parentId === undefined ? undefined : parents.get(critter.parentId)) ?? critter;
+    const priorSelf = parents.get(critter.id);
+    const parent = priorSelf ?? (critter.parentId === undefined ? undefined : parents.get(critter.parentId)) ?? critter;
+    const isNewborn = !priorSelf;
     const crossesWater = parent.habitat !== critter.habitat || critter.habitat === "shallow" || critter.habitat === "deep";
     const body = createCritterGraphic(critter);
     body.position.set(parent.x, parent.y);
@@ -240,10 +248,12 @@ function buildCritterTransition(
       curve,
       aquatic: critter.genome.aquaticMovement,
       crossesWater,
+      isNewborn,
+      action: critter.lastAction,
     });
 
     const distance = Math.hypot(critter.x - parent.x, critter.y - parent.y);
-    if ((crossesWater || distance > 120) && critter.id % 3 === 0) {
+    if ((crossesWater || critter.habitat === "target") && distance > 0.2 && critter.id % 4 === 0) {
       const reachedTarget = critter.habitat === "target" && parent.habitat !== "target";
       const trailColor = reachedTarget ? palette.food : mixColor(palette.critterLand, palette.critterWater, critter.genome.aquaticMovement);
       const trail = new Graphics()
@@ -274,8 +284,10 @@ function updateCritterTransition(motions: CritterMotion[], progress: number): vo
     const y = motion.fromY + (motion.toY - motion.fromY) * eased + Math.sin(Math.PI * eased) * motion.curve;
     motion.sprite.position.set(x, y);
     motion.sprite.rotation = Math.atan2(motion.toY - motion.fromY, motion.toX - motion.fromX) + Math.PI;
-    motion.sprite.alpha = Math.min(0.96, 0.68 + clamped * 0.36);
-    motion.sprite.scale.set(0.78 + Math.min(1, clamped * 3) * 0.22);
+    motion.sprite.alpha = Math.min(0.96, (motion.isNewborn ? clamped : 0.68 + clamped * 0.36));
+    const birthScale = motion.isNewborn ? 0.2 + clamped * 0.8 : 1;
+    const eatingPulse = motion.action === "eating" ? 1 + Math.sin(clamped * Math.PI) * 0.42 : 1;
+    motion.sprite.scale.set(birthScale * eatingPulse);
   }
 }
 
@@ -373,7 +385,7 @@ export function PixiWorld({
     if (!layers || !transition) return;
     motionsRef.current = buildCritterTransition(layers.critters, layers.trails, transition);
     updateCritterTransition(motionsRef.current, transitionProgress);
-  }, [transition?.from.generation, transition?.to.generation]);
+  }, [transition?.from.tick, transition?.to.tick]);
 
   useEffect(() => {
     updateCritterTransition(motionsRef.current, transitionProgress);
