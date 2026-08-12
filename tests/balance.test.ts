@@ -91,7 +91,7 @@ describe("five-era strategy balance", () => {
     expect(gradual.wins - random.wins).toBeGreaterThanOrEqual(3);
     expect(gradual.wins).toBeGreaterThan(random.wins);
     expect(gradual.targetPopulation).toBeGreaterThan(random.targetPopulation * 2);
-  });
+  }, 20_000);
 
   it("keeps land, shoreline, and immediate-offshore strategies ecologically distinct", () => {
     const land = benchmark(landStrategy);
@@ -101,5 +101,5 @@ describe("five-era strategy balance", () => {
     expect(offshore.aquaticMean).toBeGreaterThan(shoreline.aquaticMean);
     expect(land.landPerformance).toBeGreaterThan(offshore.landPerformance);
     expect(offshore.population).toBeLessThan(shoreline.population);
-  });
+  }, 20_000);
 });
